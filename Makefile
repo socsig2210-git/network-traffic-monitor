@@ -5,3 +5,4 @@ pcap_ex: pcap_ex.c
 
 clean:
 	rm -rf pcap_ex
+	rm -rf logfile.txt
