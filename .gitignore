@@ -1,3 +1,7 @@
 a.out
 hello
 pcap_ex
+.vscode
+pcap_test.c
+test_ip6.pcap
+logfile.txt
