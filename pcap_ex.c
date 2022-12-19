@@ -13,8 +13,8 @@
 #include <netinet/udp.h>
 
 #define MAX_SNAPLEN 65535 // Used in pcap_open_live
-#define MAX_PACKETS 2000 // Max packets per capture
-#define LOG_FILE "logfile.txt" 
+#define MAX_PACKETS 2000  // Max packets per capture
+#define LOG_FILE "logfile.txt"
 #define TIMEOUT 500
 
 #define MAX_FLOWS 50000 // Max size of flows array
@@ -100,9 +100,9 @@ int main(int argc, char *argv[])
                     printf("Invalid port, should be in range: [1, 65535]\n");
                 }
             }
-            else if (argc != 5)
+            else
             {
-                usage();
+                valid = 0;
             }
             break;
         case 'i':
@@ -118,8 +118,10 @@ int main(int argc, char *argv[])
 
     if (capture_flag == 1 && valid == 1)
     {
-        capture(dev); // Insert filters if added
-        print_statistics();
+        if (capture(dev) == 0)
+        {
+            print_statistics();
+        }
     }
     else
     {
@@ -186,7 +188,7 @@ int capture(char *dev)
     // If doesnt exist, exit
     if (dev_list == NULL)
     {
-        fprintf(stderr, "interface %s doesn't exist\n", dev);
+        fprintf(stderr, "Interface %s doesn't exist\n", dev);
         return -1;
     }
 
@@ -217,10 +219,12 @@ int capture(char *dev)
     pcap_close(handle);
     printf(" Completed!\n");
     fclose(stream);
+
+    return 0;
 }
 
 // callback function used in pcap_loop
-// Used for both reading a savefile and live capture, by either using 
+// Used for both reading a savefile and live capture, by either using
 // the stderr stream or the fd of the logfile
 void packet_handle(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *packet)
 {
@@ -230,7 +234,7 @@ void packet_handle(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char 
     const struct udphdr *udp_hdr;
 
     u_int source_port, dest_port;
-    uint8_t protocol = IPPROTO_IP;
+    uint8_t protocol = IPPROTO_IP; // initialization used to bypass flow check in case packet nor TCP nor UDP
     int data_length = 0;
 
     // Start by reading the ethernet header of packet
@@ -271,8 +275,8 @@ void packet_handle(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char 
 
             // if port_filter == 0, no filter was used
             // if port_filter > 0, filter was used and should only display packets with src/dst port == port_filter
-            if(port_filter == 0 || 
-              (port_filter > 0 && (source_port == port_filter || dest_port == port_filter)))
+            if (port_filter == 0 ||
+                (port_filter > 0 && (source_port == port_filter || dest_port == port_filter)))
             {
                 fprintf(stream, "IP Version:       IPv4\n");
                 fprintf(stream, "Source IP:        %s\n", source_ip);
@@ -300,16 +304,23 @@ void packet_handle(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char 
         {
             // UDP protocol -> using udphdr struct
             protocol = IPPROTO_UDP;
+
+            // Moving pointer accordingly
             udp_hdr = (struct udphdr *)(packet + sizeof(struct ether_header) + sizeof(struct ip));
+
+            // Convert the ports of the protocol from network bytes to u_int
             source_port = ntohs(udp_hdr->source);
             dest_port = ntohs(udp_hdr->dest);
+
+            // Calculate payload's length
             data_length = ntohs(udp_hdr->len) - sizeof(struct udphdr);
 
+            // Statistics
             stats->udp_cnt++;
             stats->udp_b_cnt += pkthdr->len;
 
-            if(port_filter == 0 || 
-              (port_filter > 0 && (source_port == port_filter || dest_port == port_filter)))
+            if (port_filter == 0 ||
+                (port_filter > 0 && (source_port == port_filter || dest_port == port_filter)))
             {
                 fprintf(stream, "IP Version:       IPv4\n");
                 fprintf(stream, "Source IP:        %s\n", source_ip);
@@ -327,6 +338,8 @@ void packet_handle(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char 
         {
             int exists = 0;
             int max = stats->network_flows_cnt;
+
+            // foreach entry inside the flows array, check for same 5-tuple
             for (int i = 0; i < max; i++)
             {
                 if (memcmp(&flows[i].src_ip.ipv4, &ip_header->ip_src, sizeof(struct in_addr)) == 0 &&
@@ -363,15 +376,18 @@ void packet_handle(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char 
     }
     else if (ntohs(ethernet_header->ether_type) == ETHERTYPE_IPV6)
     {
+        // Use struct ip6_hdr for ipv6 protocol
         const struct ip6_hdr *ip_header = (struct ip6_hdr *)(packet + sizeof(struct ether_header)); // point to ip header
 
         sizeof(struct in6_addr);
         char source_ip[INET6_ADDRSTRLEN];
         char dest_ip[INET6_ADDRSTRLEN];
 
+        // Create a presentable string for each ipv6 address (gathered from the ip_header)
         inet_ntop(AF_INET6, &(ip_header->ip6_src), source_ip, INET6_ADDRSTRLEN); // get source ip
-        inet_ntop(AF_INET6, &(ip_header->ip6_dst), dest_ip, INET6_ADDRSTRLEN);           // get destination ip
+        inet_ntop(AF_INET6, &(ip_header->ip6_dst), dest_ip, INET6_ADDRSTRLEN);   // get destination ip
 
+        // Check protocol after ipv6 protocol
         if (ip_header->ip6_nxt == IPPROTO_TCP)
         {
             protocol = IPPROTO_TCP;
@@ -382,8 +398,8 @@ void packet_handle(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char 
             stats->tcp_cnt++;
             stats->tcp_b_cnt += pkthdr->len;
 
-            if(port_filter == 0 || 
-              (port_filter > 0 && (source_port == port_filter || dest_port == port_filter)))
+            if (port_filter == 0 ||
+                (port_filter > 0 && (source_port == port_filter || dest_port == port_filter)))
             {
                 fprintf(stream, "IP Version:       IPv6\n");
                 fprintf(stream, "Source IP:        %s\n", source_ip);
@@ -416,8 +432,8 @@ void packet_handle(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char 
             stats->udp_cnt++;
             stats->udp_b_cnt += pkthdr->len;
 
-            if(port_filter == 0 || 
-              (port_filter > 0 && (source_port == port_filter || dest_port == port_filter)))
+            if (port_filter == 0 ||
+                (port_filter > 0 && (source_port == port_filter || dest_port == port_filter)))
             {
                 fprintf(stream, "IP Version:       IPv6\n");
                 fprintf(stream, "Source IP:        %s\n", source_ip);
@@ -473,6 +489,7 @@ void packet_handle(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char 
     stats->pckt_cnt++;
 }
 
+// Init statistics, used in global scope
 statistics *statistics_init()
 {
     struct statistics *stats = (struct statistics *)malloc(sizeof(struct statistics));
